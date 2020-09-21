@@ -1,0 +1,3 @@
+[submodule "lib/dep/lua-lsys"]
+	path = lib/dep/lua-lsys
+	url = https://github.com/ngwese/lua-lsys.git
