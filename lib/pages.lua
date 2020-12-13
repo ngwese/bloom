@@ -8,7 +8,7 @@ local Deque = require('container/deque')
 
 pitches = {174.543, 264.179, 279.629, 341.805, 389.674, 413.943, 523.817, 552.483, 693.637}
 
-local function snap_hz(hz, pitches)
+local function snap_hz(hz, pitches, epsilon)
   local dist = math.huge
   local snapped = 0
   local t = 0
@@ -19,6 +19,9 @@ local function snap_hz(hz, pitches)
       snapped = pc
       t = i
     end
+  end
+  if epsilon and dist > epsilon then
+    return hz, 0
   end
   return snapped, t
 end
@@ -155,16 +158,21 @@ function TunePage:on_trigger(hz)
   if self.tuning then
     self:detect_refine(hz)
   else
-    local corrected, t = snap_hz(hz, self.pitch_values)
     self.detect_last = hz
+    local epsilon_hz = 50
+    local corrected, t = snap_hz(hz, self.pitch_values, epsilon_hz)
     self.pitch_index = t
-    self.match_level = 6
-    engine.start(corrected)
+    if t > 0 then
+      self.match_level = 6
+      engine.start(corrected)
+    end
   end
 end
 
 function TunePage:detect_start(index)
   self.pitch_index = index or self.pitch_index
+  -- FIXME: snap_hz will set the index to 0
+  if self.pitch_index == 0 then self.pitch_index = 1 end
   self.detect_values = ShiftRegister(3)
   self.detect_value = self.pitch_values[self.pitch_index]
   self.detect_last = nil
@@ -240,6 +248,7 @@ function TunePage:draw_pitch(top_left)
   screen.font_size(0)
   screen.font_size(16)
   screen.level(self.MAIN_LEVEL)
+  -- screen.level(self.match_level)
   screen.text(format_num(self:get_effective_pitch(), 0.01, '-'))
 
   -- last
@@ -274,7 +283,12 @@ function TunePage:draw_slot(top_left)
   screen.font_size(0)
   screen.font_size(16)
   screen.level(self.MAIN_LEVEL)
-  screen.text(self.pitch_index)
+  -- screen.level(self.match_level)
+  if self.pitch_index == 0 then
+    screen.text('-')
+  else
+    screen.text(self.pitch_index)
+  end
 
   -- count
   screen.move(x + 1, y + median_size / 2)
@@ -287,10 +301,16 @@ end
 function TunePage:draw_match(bounds)
   if self.match_level < 1 then return end
   screen.level(self.match_level)
-  screen.rect(13, 5, 128 - 15, 32)
-  -- screen.move(13 + 4, 5)
-  -- screen.line_rel(-5, 0)
-  -- screen.line_rel(0)
+  -- screen.rect(13, 5, 128 - 15, 32)
+  screen.move(13 + 4, 5)
+  screen.line_rel(-4, 0)
+  screen.line_rel(0, 32)
+  screen.line_rel(4, 0)
+
+  screen.move(128 - 6, 5)
+  screen.line_rel(4, 0)
+  screen.line_rel(0, 32)
+  screen.line_rel(-4, 0)
   screen.stroke()
 end
 
