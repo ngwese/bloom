@@ -332,6 +332,10 @@ function TunePage:draw_header()
   local msg = "detect"
   if self.tuning then msg = "tune" end
   screen.text_rotate(6, 62, msg, -90)
+  -- inner box
+  screen.rect(1, 1, 5, 5)
+  screen.fill()
+
 end
 
 function TunePage:draw_footer()
