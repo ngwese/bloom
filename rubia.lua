@@ -25,7 +25,7 @@ display = sky.Chain{
 
 osc_input = sky.OSCInput{
   chain = sky.Chain{
-    sky.Logger{},
+    logger,
     ui:event_router(),
   }
 }
@@ -33,13 +33,17 @@ osc_input = sky.OSCInput{
 norns_input = sky.NornsInput{
   chain = sky.Chain{
     logger,
+    ui:event_router(),
   }
 }
 
 redraw_id = nil
 
 function init()
-  engine.onset_threshold(0.12) -- handpan (with contact mic)
+  audio:monitor_mono()
+  audio:pitch_on()
+
+  -- engine.onset_threshold(0.12) -- handpan (with contact mic)
   engine.onset_threshold(1.8)  -- kalimba
   engine.onsets_delay(0.02)
 
