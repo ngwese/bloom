@@ -1,3 +1,9 @@
 [submodule "lib/dep/lua-lsys"]
 	path = lib/dep/lua-lsys
 	url = https://github.com/ngwese/lua-lsys.git
+[submodule "lib/dep/rxi-json"]
+	path = lib/dep/rxi-json
+	url = https://github.com/rxi/json.lua.git
+[submodule "lib/dep/lua-scala"]
+	path = lib/dep/lua-scala
+	url = https://github.com/ngwese/lua-scala.git
