@@ -1,8 +1,9 @@
 sky.use('core/page')
 sky.use('io/norns')
 
-local Deque = require('container/deque')
--- local Number = require('params/number')
+local collections = include('lib/collections')
+local selectors = include('lib/selectors')
+local ActionWidget = include('lib/action_widget')
 
 -- local json = include('lib/dep/rxi-json/json')
 
@@ -36,84 +37,13 @@ function average(numbers)
   return sum / t
 end
 
---
--- ShiftRegister
---
-local ShiftRegister = sky.Object:extend()
+local TuningSelector = selectors.Selector(function()
+  return selectors.gather_files(paths.this.data, '*.tune.jaon', {'...'})
+end)
 
-function ShiftRegister:new(size, on_spill)
-  self._elements = Deque.new()
-  self.size = size or 8
-  self.on_spill = on_spill or function(...) end
-end
-
-function ShiftRegister:push(item)
-  self._elements:push(item)
-  local c = self._elements:count() - self.size
-  for i = 1, c do
-    self.on_spill(self._elements:pop_back())
-  end
-end
-
-function ShiftRegister:ipairs()
-  return self._elements:ipairs()
-end
-
-function ShiftRegister:to_array()
-  return self._elements:to_array()
-end
-
---
--- SlotWidget
---
-local SlotWidget = sky.Object:extend()
-SlotWidget.BOX_DIM = 8
-SlotWidget.BOX_SEP = 3
-SlotWidget.BOX_PAD = 4
-SlotWidget.SELECTED_LEVEL = 10
-
-function SlotWidget:new(x, y)
-  self.topleft = {x or 1, y or 1}
-end
-
---
--- NumWidget
---
-local NumWidget = SlotWidget:extend()
-
-function NumWidget:new(x, y, num)
-  NumWidget.super.new(self, x, y)
-  self.num = num
-end
-
-function NumWidget:draw(selected, num)
-  local x = self.topleft[1]
-  local y = self.topleft[2]
-  local full_dim = self.BOX_PAD * 2 + self.BOX_SEP + self.BOX_DIM * 2
-  local half_dim = full_dim / 2
-
-  -- outer
-  screen.move(x, y + 3)
-  screen.line_rel(0, -3)
-  screen.line_rel(full_dim - 1, 0)
-  screen.line_rel(0, 3)
-  screen.level(2)
-  screen.stroke()
-  screen.move(x + half_dim - 2, y + half_dim + 4)
-  if selected then screen.level(self.SELECTED_LEVEL) end
-  screen.font_size(16)
-  screen.text_center(num or self.num)
-
-  if selected then
-    local dx = x + full_dim
-    screen.move(x, y + full_dim)
-    screen.line_rel(full_dim - 1, 0)
-    screen.level(self.SELECTED_LEVEL)
-    screen.close()
-    screen.stroke()
-  end
-end
-
+local ScalaSelector = selectors.Selector(function()
+  return selectors.gather_files(paths.this.data, '*.scala', {'...'})
+end)
 
 --
 -- TunePage
@@ -133,7 +63,7 @@ function TunePage:new()
   self.pitch_index = 1
   self.pitch_values = {}
 
-  self.detect_values = ShiftRegister(3)
+  self.detect_values = collections.ShiftRegister(3)
   self.detect_value = nil
   self.detect_last = nil
 
@@ -142,7 +72,11 @@ function TunePage:new()
 
   self.match_level = 12
 
-  self.slot = NumWidget(128 - 26, 7, self.pitch_index)
+  self.actions = ActionWidget({16, 50}, {
+    {'load tuning:', TuningSelector, self.do_load_tuning},
+    {'save tuning:', TuningSelector, self.do_save_tuning},
+    {'load scala:', ScalaSelector, self.do_load_scala},
+  })
 
   self.chain = sky.Chain{
     sky.OSCFunc{
@@ -169,11 +103,19 @@ function TunePage:on_trigger(hz)
   end
 end
 
+function TunePage:enter(props)
+  print('refresh start')
+  ScalaSelector:refresh()
+  TuningSelector:refresh()
+  print('refresh end')
+end
+
+
 function TunePage:detect_start(index)
   self.pitch_index = index or self.pitch_index
   -- FIXME: snap_hz will set the index to 0
   if self.pitch_index == 0 then self.pitch_index = 1 end
-  self.detect_values = ShiftRegister(3)
+  self.detect_values = collections.ShiftRegister(3)
   self.detect_value = self.pitch_values[self.pitch_index]
   self.detect_last = nil
 end
@@ -348,7 +290,8 @@ end
 
 function TunePage:draw(event, props)
   self:draw_header()
-  self:draw_footer()
+  self.actions:draw()
+  -- self:draw_footer()
   self:draw_pitch({18, 20})
   self:draw_slot({98, 20})
   if not self.tuning then
@@ -399,6 +342,9 @@ function TunePage:process(event, output, state, props)
       if self.tuning then
         -- print('adjust detection pitch')
         self.detect_value = util.clamp((self.detect_value or 0) + (event.delta * 0.2), 0, 20000)
+      else
+        -- select action
+        self.actions:selection_delta(event.delta * 0.2)
       end
     elseif event.n == 3 then
       if self._k3z == 1 then
@@ -415,28 +361,19 @@ function TunePage:process(event, output, state, props)
   end
 end
 
-
---
--- Controller
---
-
-local Controller = sky.Object:extend()
-
-function Controller:new(model)
-  self.model = model
+function TunePage:do_load_scala()
+  print('do_load_scala')
 end
 
-function Controller:add_params()
-  params:add_separator('rubia')
+function TunePage:do_load_tuning()
+  print('do_load_tuning')
+end
+
+function TunePage:do_save_tuning()
+  print('do_save_tuning')
 end
 
 --
 -- module
 --
-return {
-  TunePage = TunePage,
-  Controller = Controller,
-
-  -- TODO: move this elsewhere
-  ShiftRegister = ShiftRegister,
-}
+return TunePage

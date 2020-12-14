@@ -4,21 +4,21 @@ include('sky/unstable')
 sky.use('io/norns')
 sky.use('lib/io/osc')
 
-pages = include('lib/pages')
+TunePage = include('lib/tune_page')
 
 logger = sky.Logger{}
 
-ui = sky.PageRouter{
+pages = sky.PageRouter{
   initial = 'tune',
   pages = {
-    tune = pages.TunePage()
+    tune = TunePage()
   }
 }
 
 display = sky.Chain{
   sky.NornsDisplay{
     screen.clear,
-    ui:draw_router(),
+    pages:draw_router(),
     screen.update,
   }
 }
@@ -26,14 +26,14 @@ display = sky.Chain{
 osc_input = sky.OSCInput{
   chain = sky.Chain{
     logger,
-    ui:event_router(),
+    pages:event_router(),
   }
 }
 
 norns_input = sky.NornsInput{
   chain = sky.Chain{
     logger,
-    ui:event_router(),
+    pages:event_router(),
   }
 }
 
