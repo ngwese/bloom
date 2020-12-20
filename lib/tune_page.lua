@@ -72,8 +72,8 @@ function TunePage:new()
 
   self.reference_amp = 0
 
-  self._k1z = 0
-  self._k3z = 0
+  -- key state
+  self._kz = {0, 0, 0}
 
   self.match_level = 12
 
@@ -115,6 +115,10 @@ function TunePage:enter(props)
   print('refresh end')
 end
 
+function TunePage:exit(props)
+  -- just in case
+  engine.reference_stop()
+end
 
 function TunePage:detect_start(index)
   self.pitch_index = index or self.pitch_index
@@ -319,91 +323,101 @@ function TunePage:pitch_index_set(i)
   self.pitch_index = util.clamp(i, 1, self.pitch_num)
 end
 
-function TunePage:process(event, output, state, props)
+function TunePage:do_detect_start()
+  print('detect start')
+  self:detect_start()
+  -- FIXME: need to start at some pitch if an onset has not yet
+  -- occurred
+  if self.detect_value == nil then self.detect_value = 440 end
+  engine.reference_start(self.detect_value, self.reference_amp)
+end
+
+function TunePage:do_detect_stop()
+  print('detect stop')
+  self:detect_stop()
+  engine.reference_stop()
+end
+
+function TunePage:process_detect(event, output, state, props)
   if sky.is_key(event) then
-    if event.n == 1 then
-      self._k1z = event.z
-    elseif event.n == 2 then
-      self._k2z = event.z
-    elseif event.n == 3 then
-      self._k3z = event.z
-      if event.z == 1 then
-        if self._k1z == 1 then
-          -- K1 + K3, toggle tuning
-          self.tuning = not self.tuning -- toggle tuning
-          if self.tuning then
-            print('detect start')
-            self:detect_start()
-            -- FIXME: need to start at some pitch if an onset has not yet
-            -- occurred
-            if self.detect_value == nil then self.detect_value = 440 end
-            engine.reference_start(self.detect_value, self.reference_amp)
-          else
-            print('detect stop')
-            self:detect_stop()
-            engine.reference_stop()
-          end
-        else
-          -- just K3
-          if self.tuning then
-            -- advance pitch_index
-            print('advance pitch index')
-            self:detect_stop()
-            self:pitch_index_delta(1, true)
-            self:detect_start()
-          else
-            -- trigger action
-            local action = self.actions:selected_handler()
-            if action then
-              action(self, self.actions:selected_value())
-            end
-          end
-        end
+    if event.n == 3 and event.z == 1 then
+      -- trigger action
+      local action = self.actions:selected_handler()
+      if action then
+        action(self, self.actions:selected_value())
       end
     end
   elseif sky.is_enc(event) then
-    if event.n == 1 then
-      if self.tuning and self._k1z == 1 then
-        -- adjust amp for pitch reference
-        self.reference_amp = util.clamp(self.reference_amp + (event.delta * 0.01), 0, 0.8)
-        engine.reference_amp(self.reference_amp)
-      end
-    elseif event.n == 2 then
-      -- allow for manually adjusting the tuning value
-      if self.tuning then
-        -- print('adjust detection pitch')
-        local step = 10
-        if self._k1z == 1 then step = 0.1 end
-        self.detect_value = util.clamp((self.detect_value or 0) + (event.delta * step), 0, 20000)
-        engine.reference_hz(self.detect_value)
-      else
-        -- select action
-        self.actions:selection_delta(event.delta * 0.2)
-      end
+    if event.n == 2 then
+      -- select action
+      self.actions:selection_delta(event.delta * 0.2)
     elseif event.n == 3 then
-      if self._k1z == 1 then
-        -- K1 + E3
+      -- select action value
+      self.actions:selector_delta(event.delta * 0.2)
+    end
+  else
+    self.chain:process(event, nil, output)
+  end
+end
+
+function TunePage:process_tune(event, output, state, props)
+  if sky.is_key(event) then
+    if event.n == 3 and event.z == 1 then
+      -- advance pitch_index
+      print('advance pitch index')
+      self:detect_stop()
+      self:pitch_index_delta(1, true)
+      self:detect_start()
+    end
+  elseif sky.is_enc(event) then
+    if event.n == 1 and self._kz[1] == 1 then
+      -- E1 + K1: adjust amp for pitch reference
+      self.reference_amp = util.clamp(self.reference_amp + (event.delta * 0.01), 0, 0.8)
+      engine.reference_amp(self.reference_amp)
+    elseif event.n == 2 then
+      -- E2 [+ K1]: allow for manually adjusting the tuning value
+      local step = 10
+      if self._kz[1] == 1 then step = 0.1 end
+      self.detect_value = util.clamp((self.detect_value or 0) + (event.delta * step), 0, 20000)
+      engine.reference_hz(self.detect_value)
+    elseif event.n == 3 then
+      if self._kz[1] == 1 then
+        -- E3 + K1: adjust number of pitches in table
         self.pitch_num = util.clamp(self.pitch_num + event.delta, 1, 127)
         self:pitch_index_set(self.pitch_index) -- keep in range
-      elseif self._k2z == 1 then
-        self:pitch_index_delta(event.delta)
-        if self.tuning then
-          -- clear detect shift register
-          -- update reference pitch
-          -- FIXME: THIS IS BROKEN
-          -- self:detect_stop()
-          -- self:detect_start()
-          -- engine.reference_hz(self:get_effective_pitch())
-        end
       else
-        -- select action value
-        self.actions:selector_delta(event.delta * 0.2)
+        -- E3: adjust which pitch is currently being adjusted
+        self:detect_stop()
+        self:pitch_index_delta(event.delta)
+        self:detect_start()
+        engine.reference_hz(self:get_effective_pitch())
       end
     end
   else
-    -- run events through the embedded chain, outputing to whatever chain this
-    -- page is embeded in.
     self.chain:process(event, nil, output)
+  end
+end
+
+function TunePage:process(event, output, state, props)
+  if sky.is_key(event) then
+    self._kz[event.n] = event.z
+    if self._kz[1] == 1 and self._kz[3] == 1 then
+      -- K1 + K3, mode switch (toggle tuning)
+      self.tuning = not self.tuning
+      if self.tuning then
+        self:do_detect_start()
+        return
+      else
+        self:do_detect_stop()
+        return
+      end
+    end
+  end
+
+  if self.tuning then
+    self:process_tune(event, output, state, props)
+  else
+    self:process_detect(event, output, state, props)
   end
 end
 
@@ -426,7 +440,7 @@ function TunePage:do_load_scala(what)
 end
 
 function TunePage:do_load_tuning(what)
-  print('do_load_tuning(' .. what .. ')')
+  print('do_load_tuning("' .. what .. '")')
   local fs = require('fileselect')
 
   local _load = function(path)
@@ -455,7 +469,7 @@ function TunePage:do_load_tuning(what)
 end
 
 function TunePage:do_save_tuning(what)
-  print('do_save_tuning(' .. what .. ')')
+  print('do_save_tuning("' .. what .. '")')
   local te = require('textentry')
 
 
