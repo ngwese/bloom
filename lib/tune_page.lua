@@ -4,6 +4,7 @@ sky.use('io/norns')
 local collections = include('lib/collections')
 local selectors = include('lib/selectors')
 local ActionWidget = include('lib/action_widget')
+local json = include('lib/dep/rxi-json/json')
 
 -- local json = include('lib/dep/rxi-json/json')
 
@@ -37,10 +38,12 @@ function average(numbers)
   return sum / t
 end
 
-local TuningSelector = selectors.Selector(function()
-  return selectors.gather_files(paths.this.data, '*.tune.jaon', {'...'})
+local TUNING_EXTN = '.tune.json'
+TuningSelector = selectors.Selector(function()
+  return selectors.gather_files(paths.this.data, '*.tune.json', {'...'})
 end)
 
+local SCALA_EXTN = '.scala'
 local ScalaSelector = selectors.Selector(function()
   return selectors.gather_files(paths.this.data, '*.scala', {'...'})
 end)
@@ -67,12 +70,14 @@ function TunePage:new()
   self.detect_value = nil
   self.detect_last = nil
 
+  self.reference_amp = 0
+
   self._k1z = 0
   self._k3z = 0
 
   self.match_level = 12
 
-  self.actions = ActionWidget({16, 50}, {
+  self.actions = ActionWidget({19, 50}, {
     {'load tuning:', TuningSelector, self.do_load_tuning},
     {'save tuning:', TuningSelector, self.do_save_tuning},
     {'load scala:', ScalaSelector, self.do_load_scala},
@@ -131,6 +136,7 @@ function TunePage:detect_refine(pitch)
   self.detect_values:push(pitch)
   local a = average(self.detect_values:to_array())
   self.detect_value = a
+  engine.reference_hz(a)
 end
 
 function TunePage:draw_bug(top_left)
@@ -317,41 +323,81 @@ function TunePage:process(event, output, state, props)
   if sky.is_key(event) then
     if event.n == 1 then
       self._k1z = event.z
-    elseif event.n == 2 and event.z == 1 then
-      self.tuning = not self.tuning -- toggle tuning
-      if self.tuning then
-        print('detect start')
-        self:detect_start()
-      else
-        print('detect stop')
-        self:detect_stop()
-      end
+    elseif event.n == 2 then
+      self._k2z = event.z
     elseif event.n == 3 then
       self._k3z = event.z
-      if event.z == 1 and self.tuning then
-        -- advance pitch_index
-        print('advance pitch index')
-        self:detect_stop()
-        self:pitch_index_delta(1, true)
-        self:detect_start()
+      if event.z == 1 then
+        if self._k1z == 1 then
+          -- K1 + K3, toggle tuning
+          self.tuning = not self.tuning -- toggle tuning
+          if self.tuning then
+            print('detect start')
+            self:detect_start()
+            -- FIXME: need to start at some pitch if an onset has not yet
+            -- occurred
+            if self.detect_value == nil then self.detect_value = 440 end
+            engine.reference_start(self.detect_value, self.reference_amp)
+          else
+            print('detect stop')
+            self:detect_stop()
+            engine.reference_stop()
+          end
+        else
+          -- just K3
+          if self.tuning then
+            -- advance pitch_index
+            print('advance pitch index')
+            self:detect_stop()
+            self:pitch_index_delta(1, true)
+            self:detect_start()
+          else
+            -- trigger action
+            local action = self.actions:selected_handler()
+            if action then
+              action(self, self.actions:selected_value())
+            end
+          end
+        end
       end
     end
   elseif sky.is_enc(event) then
-    if event.n == 2 then
+    if event.n == 1 then
+      if self.tuning and self._k1z == 1 then
+        -- adjust amp for pitch reference
+        self.reference_amp = util.clamp(self.reference_amp + (event.delta * 0.01), 0, 0.8)
+        engine.reference_amp(self.reference_amp)
+      end
+    elseif event.n == 2 then
       -- allow for manually adjusting the tuning value
       if self.tuning then
         -- print('adjust detection pitch')
-        self.detect_value = util.clamp((self.detect_value or 0) + (event.delta * 0.2), 0, 20000)
+        local step = 10
+        if self._k1z == 1 then step = 0.1 end
+        self.detect_value = util.clamp((self.detect_value or 0) + (event.delta * step), 0, 20000)
+        engine.reference_hz(self.detect_value)
       else
         -- select action
         self.actions:selection_delta(event.delta * 0.2)
       end
     elseif event.n == 3 then
-      if self._k3z == 1 then
+      if self._k1z == 1 then
+        -- K1 + E3
         self.pitch_num = util.clamp(self.pitch_num + event.delta, 1, 127)
         self:pitch_index_set(self.pitch_index) -- keep in range
-      else
+      elseif self._k2z == 1 then
         self:pitch_index_delta(event.delta)
+        if self.tuning then
+          -- clear detect shift register
+          -- update reference pitch
+          -- FIXME: THIS IS BROKEN
+          -- self:detect_stop()
+          -- self:detect_start()
+          -- engine.reference_hz(self:get_effective_pitch())
+        end
+      else
+        -- select action value
+        self.actions:selector_delta(event.delta * 0.2)
       end
     end
   else
@@ -361,16 +407,93 @@ function TunePage:process(event, output, state, props)
   end
 end
 
-function TunePage:do_load_scala()
+-- FIXME: move this into a common place
+local function expand_path(p, prefix, extension)
+  if p:find(prefix) == nil then
+    print('prepending: "' .. p .. '" with', prefix)
+    p = prefix .. p
+  end
+  if string.find(p, extension, -#extension, true) == nil then
+    p = p .. extension
+    print('extending', p, 'with', extension)
+  end
+  return p
+end
+
+
+function TunePage:do_load_scala(what)
   print('do_load_scala')
 end
 
-function TunePage:do_load_tuning()
-  print('do_load_tuning')
+function TunePage:do_load_tuning(what)
+  print('do_load_tuning(' .. what .. ')')
+  local fs = require('fileselect')
+
+  local _load = function(path)
+    if path and path ~= 'cancel' then
+      local src = expand_path(path, paths.this.data, TUNING_EXTN)
+      print('loading:', src)
+      local f = io.open(src, 'r')
+      local data = f:read()
+      f:close()
+      local props = json.decode(data)
+      self:load(props)
+      tab.print(props)
+    end
+  end
+
+  if what == '...' then
+    sky.set_focus(false)
+    fs.enter(paths.this.data, function(path)
+      print('selected:', path)
+      _load(path)
+      sky.set_focus(true)
+    end)
+  else
+    _load(what)
+  end
 end
 
-function TunePage:do_save_tuning()
-  print('do_save_tuning')
+function TunePage:do_save_tuning(what)
+  print('do_save_tuning(' .. what .. ')')
+  local te = require('textentry')
+
+
+  local _save = function(path)
+    if path and path ~= 'cancel' then
+      local dest = expand_path(path, paths.this.data, TUNING_EXTN)
+      print('saving:', dest)
+      local data = json.encode(self:store())
+      local f = io.open(dest, 'w+')
+      f:write(data)
+      f:close()
+    end
+  end
+
+  if what == '...' then
+    sky.set_focus(false)
+    te.enter(function(path)
+      if path then _save(path) end
+      TuningSelector:refresh()
+      sky.set_focus(true)
+    end, 'foo')
+  else
+    _save(what)
+  end
+end
+
+function TunePage:store()
+  return { __type = 'TunePage', __version = 1, pitches = self.pitch_values }
+end
+
+function TunePage:load(data)
+  if data.__type ~= 'TunePage' and data.__version ~= 1 then
+    error('cannot load tuning: incorrect type or version')
+  end
+
+  self.pitch_index = 1
+  self.pitch_values = data.pitches
+  self.pitch_num = #data.pitches
 end
 
 --

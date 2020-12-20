@@ -14,6 +14,8 @@ function ActionWidget:new(rect, actions)
   self._actions = actions
   self._which_acc = 1.5
   self:select(1)
+  self._what_acc = 1
+  self:selector_delta(1)
 end
 
 function ActionWidget:selection_delta(d)
@@ -39,6 +41,13 @@ function ActionWidget:selected_value()
     return self._selector:value()
   end
   return ''
+end
+
+function ActionWidget:selector_delta(d)
+  if self._selector then
+    self._what_acc = util.clamp(self._what_acc + d, 1, self._selector.len)
+    self._selector:select(self._what_acc)
+  end
 end
 
 function ActionWidget:selected_handler()

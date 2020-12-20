@@ -1,5 +1,6 @@
 Engine_Rubia : CroneEngine {
   var <detector;
+  var <reference;
   var <synthGroup;
   var <fxGroup;
   // var <synth;
@@ -25,6 +26,12 @@ Engine_Rubia : CroneEngine {
       Out.ar(out, snd * env);
     }).add;
 
+    SynthDef(\reference, {
+      arg out, freq = 440, amp = 0.2;
+      var snd = SinOsc.ar(OnePole.kr(freq, 0.95)) * OnePole.kr(amp, 0.95);
+      Out.ar(out, snd!2);
+    }).add;
+
     context.server.sync;
 
     // synth controls
@@ -40,6 +47,23 @@ Engine_Rubia : CroneEngine {
 
     this.addCommand(\onsets_delay, "f", { arg msg;
       detector.setOnsetsDelay(msg[1]);
+    });
+
+    // tuning reference controls
+    this.addCommand(\reference_start, "ff", { arg msg;
+      reference = Synth.new(\reference, [\out, context.out_b.index, \freq, msg[1], \amp, msg[2]], synthGroup);
+    });
+
+    this.addCommand(\reference_stop, "", { arg msg;
+      reference.free;
+    });
+
+    this.addCommand(\reference_hz, "f", { arg msg;
+      reference.set(\freq, msg[1]);
+    });
+
+    this.addCommand(\reference_amp, "f", { arg msg;
+      reference.set(\amp, msg[1]);
     });
 
     // start everything up
