@@ -58,6 +58,9 @@ function init()
 end
 
 function cleanup()
+  -- just in case
+  engine.reference_stop()
   -- TODO: package in sky/process.lua
   clock.cancel(redraw_id)
+
 end

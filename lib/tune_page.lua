@@ -61,6 +61,7 @@ function TunePage:new()
   TunePage.super.new(self)
 
   self.tuning = false
+  self.dirty = false
 
   self.pitch_num = 1
   self.pitch_index = 1
@@ -132,6 +133,7 @@ end
 function TunePage:detect_stop()
   if self.detect_value then
     self.pitch_values[self.pitch_index] = self.detect_value
+    self.dirty = true
   end
 end
 
@@ -193,14 +195,9 @@ function TunePage:draw_pitch(top_left)
 
   -- median
   screen.move(x, y)
-  -- screen.font_face(21)
-  -- screen.font_size(15) --median_size)
-  -- screen.font_face(49)
-  -- screen.font_size(18) --median_size)
   screen.font_size(0)
   screen.font_size(16)
   screen.level(self.MAIN_LEVEL)
-  -- screen.level(self.match_level)
   screen.text(format_num(self:get_effective_pitch(), 0.01, '-'))
 
   -- last
@@ -210,20 +207,6 @@ function TunePage:draw_pitch(top_left)
   screen.level(self.DETECT_LEVEL)
   screen.text('> ' .. format_num(self.detect_last, 0.01))
 end
-
---[[
-function TunePage:draw_slot()
-  --self.slot:draw(false, self.pitch_index)
-  -- self.slot:draw(true, 30)
-  screen.move(14, 45)
-  screen.font_face(0)
-  screen.font_size(8)
-  screen.level(self.MAIN_LEVEL)
-  screen.text(self.pitch_index)
-  screen.level(self.DETECT_LEVEL)
-  screen.text(' /' .. self.pitch_num)
-end
-]]--
 
 function TunePage:draw_slot(top_left)
   local x = top_left[1]
@@ -272,7 +255,7 @@ function TunePage:match_level_delta(d)
   end
 end
 
-function TunePage:draw_header()
+function TunePage:draw_header(changed)
   -- box
   screen.level(4)
   screen.rect(0, 0, 7, 65)
@@ -287,6 +270,12 @@ function TunePage:draw_header()
   -- inner box
   screen.rect(1, 1, 5, 5)
   screen.fill()
+  -- dirty
+  if changed then
+    screen.level(4)
+    screen.rect(2, 2, 3, 3)
+    screen.fill()
+  end
 
 end
 
@@ -299,7 +288,7 @@ function TunePage:draw_footer()
 end
 
 function TunePage:draw(event, props)
-  self:draw_header()
+  self:draw_header(self.dirty)
   self.actions:draw()
   -- self:draw_footer()
   self:draw_pitch({18, 20})
@@ -315,6 +304,7 @@ function TunePage:pitch_index_delta(d, extend)
   local v = self.pitch_index + d
   if extend and v > self.pitch_num then
     self.pitch_num = self.pitch_num + 1
+    self.dirty = true
   end
   self.pitch_index = util.clamp(v, 1, self.pitch_num)
 end
@@ -452,7 +442,7 @@ function TunePage:do_load_tuning(what)
       f:close()
       local props = json.decode(data)
       self:load(props)
-      tab.print(props)
+      self.dirty = false
     end
   end
 
@@ -481,6 +471,7 @@ function TunePage:do_save_tuning(what)
       local f = io.open(dest, 'w+')
       f:write(data)
       f:close()
+      self.dirty = false
     end
   end
 
